@@ -1,14 +1,15 @@
 import streamlit as st
 import requests
 import base64
-from PIL import Image
-from io import BytesIO
+import json
 
 # --- Constants & Configuration ---
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+# Updated to the latest stable model ID
+MODEL_ID = "gemini-2.5-flash"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent"
 
 st.set_page_config(
-    page_title="AI Influencer Generator",
+    page_title="AI Influencer Studio",
     page_icon="📸",
     layout="wide"
 )
@@ -18,26 +19,32 @@ st.set_page_config(
 def encode_image_to_base64(uploaded_file):
     """Converts a Streamlit uploaded file to a base64 string."""
     try:
-        bytes_data = uploaded_file.getvalue()
-        return base64.b64encode(bytes_data).decode('utf-8')
+        return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
     except Exception as e:
         st.error(f"Error encoding image: {e}")
         return None
 
-def generate_influencer(api_key, prompt, pose_b64, face_b64, clothes_b64):
-    """Sends multimodal request to Gemini API."""
+def generate_influencer_content(api_key, prompt, pose_b64, face_b64, clothes_b64):
+    """Sends multimodal request to the updated Gemini 2.5 API."""
     headers = {'Content-Type': 'application/json'}
     params = {'key': api_key}
     
-    # Constructing the multimodal prompt payload
+    # Structured prompt to guide the model's multimodal reasoning
+    full_prompt = (
+        "ACT AS A PHOTOREALISTIC IMAGE GENERATOR ENGINE. "
+        "Analysis Tasks:\n"
+        "1. Extract the exact physical pose from Image 1.\n"
+        "2. Extract the facial features and identity from Image 2.\n"
+        "3. Extract the clothing style and textures from Image 3.\n\n"
+        f"USER SPECIFICATIONS: {prompt}\n\n"
+        "OUTPUT REQUIREMENT: Generate a highly detailed, cinematic Instagram influencer image "
+        "merging these three references perfectly."
+    )
+
     payload = {
         "contents": [{
             "parts": [
-                {"text": f"Instructions: Create a photorealistic Instagram influencer image. "
-                         f"Reference 1 (Pose): Use the pose from the first image. "
-                         f"Reference 2 (Face): Use the facial identity from the second image. "
-                         f"Reference 3 (Clothing): Use the outfit style from the third image. "
-                         f"User Prompt: {prompt}"},
+                {"text": full_prompt},
                 {"inline_data": {"mime_type": "image/jpeg", "data": pose_b64}},
                 {"inline_data": {"mime_type": "image/jpeg", "data": face_b64}},
                 {"inline_data": {"mime_type": "image/jpeg", "data": clothes_b64}}
@@ -48,74 +55,60 @@ def generate_influencer(api_key, prompt, pose_b64, face_b64, clothes_b64):
     try:
         response = requests.post(API_URL, headers=headers, params=params, json=payload)
         response.raise_for_status()
-        
-        # Note: Gemini 1.5 Flash returns text descriptions/reasoning. 
-        # If the specific model version supports image output bytes, 
-        # it would be parsed here.
         return response.json()
     except requests.exceptions.RequestException as e:
-        st.error(f"API Request Failed: {e}")
+        # Provide more context on the error for the user
+        error_msg = response.text if 'response' in locals() else str(e)
+        st.error(f"API Error: {error_msg}")
         return None
 
 # --- UI Layout ---
 
-st.title("📸 AI Influencer Studio")
-st.markdown("Generate high-fidelity influencer content by combining pose, face, and style references.")
+st.title("📸 AI Influencer Studio v2.5")
+st.markdown("Utilizing **Gemini 2.5 Flash** for high-fidelity multimodal synthesis.")
 
-# Sidebar for API Key
 with st.sidebar:
-    st.header("Settings")
-    api_key = st.text_input("Gemini API Key", type="password", help="Enter your Google AI Studio API Key")
-    st.info("Your key is processed over HTTPS and never stored.")
+    st.header("Authentication")
+    api_key = st.text_input("Gemini API Key", type="password")
+    st.divider()
+    st.info(f"Currently using model: {MODEL_ID}")
 
-# Main UI Columns
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Reference Assets")
+    st.subheader("Upload Reference Assets")
+    pose_img = st.file_uploader("1. Pose Reference (Image 1)", type=['jpg', 'jpeg', 'png'])
+    face_img = st.file_uploader("2. Face Identity (Image 2)", type=['jpg', 'jpeg', 'png'])
+    clothes_img = st.file_uploader("3. Clothing Reference (Image 3)", type=['jpg', 'jpeg', 'png'])
     
-    pose_img = st.file_uploader("1. Pose Reference", type=['jpg', 'jpeg', 'png'])
-    face_img = st.file_uploader("2. Face Identity", type=['jpg', 'jpeg', 'png'])
-    clothes_img = st.file_uploader("3. Clothing Reference", type=['jpg', 'jpeg', 'png'])
+    user_prompt = st.text_area("Scene Description", value="Standing in a luxury penthouse at sunset, hyper-realistic, 8k.")
     
-    user_prompt = st.text_area(
-        "Additional Prompt Details", 
-        placeholder="e.g., Standing in a sunlit Parisian cafe, 8k resolution, cinematic lighting..."
-    )
-
-    generate_btn = st.button("Generate Influencer", type="primary", use_container_width=True)
-
-with col2:
-    st.subheader("Generated Output")
-    
-    if generate_btn:
+    if st.button("Generate Influencer", type="primary", use_container_width=True):
         if not api_key:
-            st.warning("Please enter your API Key in the sidebar.")
-        elif not (pose_img and face_img and clothes_img):
-            st.warning("Please upload all three reference images.")
+            st.warning("Please provide an API Key.")
+        elif not all([pose_img, face_img, clothes_img]):
+            st.warning("All three reference images are required.")
         else:
-            with st.spinner("Processing multimodal references and generating..."):
-                # Encode images
+            with st.spinner("Analyzing references and generating..."):
                 p_b64 = encode_image_to_base64(pose_img)
                 f_b64 = encode_image_to_base64(face_img)
                 c_b64 = encode_image_to_base64(clothes_img)
                 
-                # Call API
-                result = generate_influencer(api_key, user_prompt, p_b64, f_b64, c_b64)
+                result = generate_influencer_content(api_key, user_prompt, p_b64, f_b64, c_b64)
                 
                 if result:
-                    # Logic to display the returned image
-                    # Since standard Gemini 1.5 returns text, we display the model's response 
-                    # or the image if the specific endpoint/tier provides it.
-                    st.success("Generation Complete!")
-                    st.json(result) # Displaying raw JSON for debug/output verification
-                else:
-                    st.error("Failed to generate content. Check the API logs.")
+                    st.session_state['api_result'] = result
 
-# Preview uploaded images in a low-profile way
-if any([pose_img, face_img, clothes_img]):
-    with st.expander("Preview Uploaded References"):
-        p_cols = st.columns(3)
-        if pose_img: p_cols[0].image(pose_img, caption="Pose")
-        if face_img: p_cols[1].image(face_img, caption="Face")
-        if clothes_img: p_cols[2].image(clothes_img, caption="Clothing")
+with col2:
+    st.subheader("Generation Result")
+    if 'api_result' in st.session_state:
+        # Note: In standard Gemini API, image generation returns are often 
+        # handled via specific media parts or specialized Nano Banana endpoints.
+        # This displays the response content.
+        res = st.session_state['api_result']
+        try:
+            # Attempting to extract text or media from the standard response format
+            text_response = res['candidates'][0]['content']['parts'][0]['text']
+            st.write(text_response)
+        except (KeyError, IndexError):
+            st.json(res)
