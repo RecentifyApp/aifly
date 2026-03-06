@@ -14,7 +14,7 @@ def encode_image(file):
 
 def generate_image(pose, face, clothes, prompt):
 
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
     headers = {
         "Content-Type": "application/json",
@@ -23,39 +23,38 @@ def generate_image(pose, face, clothes, prompt):
 
     parts = [{"text": prompt}]
 
-    # Convert images to base64
     pose_b64 = encode_image(pose)
     face_b64 = encode_image(face)
     clothes_b64 = encode_image(clothes)
 
     if pose_b64:
         parts.append({
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": pose_b64
+            "inline_data":{
+                "mime_type":"image/png",
+                "data":pose_b64
             }
         })
 
     if face_b64:
         parts.append({
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": face_b64
+            "inline_data":{
+                "mime_type":"image/png",
+                "data":face_b64
             }
         })
 
     if clothes_b64:
         parts.append({
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": clothes_b64
+            "inline_data":{
+                "mime_type":"image/png",
+                "data":clothes_b64
             }
         })
 
     data = {
-        "contents": [
+        "contents":[
             {
-                "parts": parts
+                "parts":parts
             }
         ]
     }
@@ -65,12 +64,17 @@ def generate_image(pose, face, clothes, prompt):
     result = response.json()
 
     try:
+
         parts = result["candidates"][0]["content"]["parts"]
 
         for part in parts:
+
             if "inline_data" in part:
+
                 image_data = part["inline_data"]["data"]
+
                 image_bytes = base64.b64decode(image_data)
+
                 return Image.open(BytesIO(image_bytes))
 
     except:
