@@ -5,11 +5,10 @@ import base64
 from PIL import Image
 from io import BytesIO
 
-# --- API Wrapper Class ---
 class NanoBananaAPI:
     def __init__(self, api_key):
         self.api_key = api_key
-        # Note: Updated to the correct URL from your snippet
+        # Updated to the official endpoint structure
         self.base_url = 'https://api.nanobananaapi.ai/api/v1/nanobanana'
         self.headers = {
             'Authorization': f'Bearer {api_key}',
@@ -17,26 +16,31 @@ class NanoBananaAPI:
         }
 
     def encode_image(self, uploaded_file):
-        """Helper to convert uploaded file to base64 for the API."""
-        return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+        """Encodes to Base64 and adds the required Data URI prefix."""
+        b64 = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+        # Most 3rd party APIs require the data:image prefix to recognize the string as an image
+        return f"data:image/jpeg;base64,{b64}"
 
-    def generate_image(self, prompt, pose_b64, face_b64, cloth_b64):
-        """
-        Sends multimodal images to Nano Banana. 
-        Using 'IMAGETOIMAGE' type as per standard multimodal wrappers.
-        """
+    def generate_image(self, prompt, images_b64):
         data = {
             'prompt': prompt,
             'type': 'IMAGETOIMAGE', 
             'numImages': 1,
-            # Passing images as base64 strings in the imageUrls list
-            'imageUrls': [pose_b64, face_b64, cloth_b64]
+            'imageUrls': images_b64  # This is a list of [pose, face, cloth]
         }
         
         response = requests.post(f'{self.base_url}/generate', headers=self.headers, json=data)
-        result = response.json()
         
-        if not response.ok or result.get('code') != 200:
+        # DEBUG: Check if response is actually JSON before parsing
+        if response.status_code != 200:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+            
+        try:
+            result = response.json()
+        except ValueError:
+            raise Exception(f"API returned invalid JSON: {response.text[:100]}")
+        
+        if result.get('code') != 200:
             raise Exception(f"Generation failed: {result.get('msg', 'Unknown error')}")
         
         return result['data']['taskId']
@@ -49,81 +53,46 @@ class NanoBananaAPI:
         return response.json()
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Nano Banana Influencer Studio", page_icon="🍌", layout="wide")
-
+st.set_page_config(page_title="Nano Banana Studio", page_icon="🍌")
 st.title("🍌 Nano Banana Influencer Studio")
-st.markdown("Generate high-end AI influencers using Pose, Face, and Clothing references.")
 
-# Sidebar for API Key
 with st.sidebar:
-    st.header("Settings")
-    api_key = st.text_input("Nano Banana API Key", type="password")
-    st.divider()
-    st.info("This app uses a Task-based polling system for generation.")
+    api_key = st.text_input("API Key", type="password")
 
-# Layout Columns
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("Upload References")
-    pose_img = st.file_uploader("1. Pose Reference", type=['png', 'jpg', 'jpeg'])
-    face_img = st.file_uploader("2. Face Identity", type=['png', 'jpg', 'jpeg'])
-    cloth_img = st.file_uploader("3. Clothing Reference", type=['png', 'jpg', 'jpeg'])
+    p_file = st.file_uploader("Pose Image", type=['jpg','png'])
+    f_file = st.file_uploader("Face Image", type=['jpg','png'])
+    c_file = st.file_uploader("Cloth Image", type=['jpg','png'])
+    prompt_txt = st.text_area("Prompt", "A fashion influencer in Paris")
     
-    prompt = st.text_area("Final Prompt", "Cinematic portrait of a fashion influencer, 8k, highly detailed.")
-    
-    generate_btn = st.button("Generate Influencer", type="primary", use_container_width=True)
-
-with col2:
-    st.subheader("Generation Status")
-    
-    if generate_btn:
-        if not api_key:
-            st.error("Please enter your API Key.")
-        elif not all([pose_img, face_img, cloth_img]):
-            st.warning("Please upload all three images.")
+    if st.button("Generate"):
+        if not api_key or not all([p_file, f_file, c_file]):
+            st.error("Missing API Key or Images")
         else:
             api = NanoBananaAPI(api_key)
             try:
-                # 1. Encoding
-                with st.status("Encoding images...") as status:
-                    p_b64 = api.encode_image(pose_img)
-                    f_b64 = api.encode_image(face_img)
-                    c_b64 = api.encode_image(cloth_img)
+                with st.spinner("Processing..."):
+                    # Encode all 3 images with prefixes
+                    imgs = [api.encode_image(p_file), api.encode_image(f_file), api.encode_image(c_file)]
                     
-                    # 2. Submit Task
-                    status.update(label="Submitting task to Nano Banana...", state="running")
-                    task_id = api.generate_image(prompt, p_b64, f_b64, c_b64)
-                    st.write(f"Task ID created: `{task_id}`")
+                    task_id = api.generate_image(prompt_txt, imgs)
+                    st.info(f"Task Started: {task_id}")
                     
-                    # 3. Polling for results
-                    status.update(label="Generating image (this may take 30-60s)...", state="running")
-                    
-                    placeholder = st.empty()
-                    start_time = time.time()
-                    max_wait = 300 # 5 minutes
-                    
-                    while time.time() - start_time < max_wait:
-                        task_data = api.get_task_status(task_id)
-                        success_flag = task_data.get('successFlag', 0)
+                    # Polling
+                    finished = False
+                    while not finished:
+                        status = api.get_task_status(task_id)
+                        flag = status.get('successFlag')
                         
-                        if success_flag == 1: # Success
-                            status.update(label="Success!", state="complete")
-                            img_url = task_data.get('response', {}).get('resultImageUrl')
-                            if img_url:
-                                st.image(img_url, caption="Generated AI Influencer")
-                                st.balloons()
-                            break
-                        elif success_flag in [2, 3]: # Error
-                            status.update(label="Generation Failed", state="error")
-                            st.error(task_data.get('errorMessage', 'Unknown API Error'))
-                            break
-                        
-                        # Wait 3 seconds before next poll
-                        time.sleep(3)
-                    else:
-                        status.update(label="Timeout", state="error")
-                        st.error("Generation timed out.")
-
+                        if flag == 1:
+                            url = status.get('response', {}).get('resultImageUrl')
+                            st.image(url)
+                            finished = True
+                        elif flag in [2, 3]:
+                            st.error(f"Failed: {status.get('errorMessage')}")
+                            finished = True
+                        time.sleep(4)
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Critical Error: {e}")
