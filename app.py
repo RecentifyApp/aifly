@@ -1,131 +1,131 @@
 import streamlit as st
 import requests
 import base64
-from PIL import Image
 from io import BytesIO
+from PIL import Image
 
-# --- Constants & Configuration ---
-# Nano Banana 2 Model ID
-MODEL_ID = "gemini-3.1-flash-image-preview"
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent"
+# --- Configuration ---
+# Based on Nano Banana API documentation
+API_ENDPOINT = "https://api.nanobanana.ai/v1/generate"
 
 st.set_page_config(
-    page_title="AI Influencer Generator",
-    page_icon="📸",
+    page_title="Nano Banana Influencer Studio",
+    page_icon="🍌",
     layout="wide"
 )
 
 # --- Helper Functions ---
 
 def encode_image_to_base64(uploaded_file):
-    """Converts a Streamlit uploaded file to a base64 string."""
-    try:
-        return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-    except Exception as e:
-        st.error(f"Error encoding image: {e}")
+    """Encodes uploaded file to base64 string for the Nano Banana API."""
+    if uploaded_file is None:
         return None
+    return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
 
-def generate_image(api_key, prompt, pose_b64, face_b64, clothes_b64):
-    """Sends multimodal request to Nano Banana 2 API."""
-    headers = {'Content-Type': 'application/json'}
-    params = {'key': api_key}
-    
-    # We explicitly instruct Nano Banana to treat the inputs as specific references
+def generate_influencer_image(api_key, prompt, pose_b64, face_b64, cloth_b64):
+    """
+    Sends the 3-image multimodal request to Nano Banana.
+    Nano Banana 2 (Gemini 3 Flash Image) supports image-to-image composition.
+    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    # Constructing the payload per Nano Banana's multimodal composition spec
     payload = {
-        "contents": [{
-            "parts": [
-                {"text": (
-                    "Using the following three images as references, generate a new high-quality image. "
-                    "Image 1: Use strictly for the POSE and composition. "
-                    "Image 2: Use strictly for the FACE identity and features. "
-                    "Image 3: Use strictly for the CLOTHING and outfit style. "
-                    f"Final Scene Description: {prompt}. "
-                    "Output a photorealistic Instagram influencer photo."
-                )},
-                {"inline_data": {"mime_type": "image/jpeg", "data": pose_b64}},
-                {"inline_data": {"mime_type": "image/jpeg", "data": face_b64}},
-                {"inline_data": {"mime_type": "image/jpeg", "data": clothes_b64}}
-            ]
-        }]
+        "model": "nano-banana-2",
+        "prompt": prompt,
+        "images": [
+            {"data": pose_b64, "type": "pose_reference"},
+            {"data": face_b64, "type": "face_identity"},
+            {"data": cloth_b64, "type": "clothing_reference"}
+        ],
+        "parameters": {
+            "resolution": "1080x1350", # Standard Instagram Portrait
+            "guidance_scale": 7.5,
+            "realism_mode": True
+        }
     }
 
     try:
-        response = requests.post(API_URL, headers=headers, params=params, json=payload)
+        response = requests.post(API_ENDPOINT, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        error_details = response.text if 'response' in locals() else str(e)
-        st.error(f"API Error: {error_details}")
+        st.error(f"Nano Banana API Error: {e}")
+        if response.text:
+            st.code(response.text)
         return None
 
 # --- UI Layout ---
 
-st.title("📸 Nano Banana Influencer Studio")
-st.markdown("Combine pose, face, and clothing into a single AI-generated influencer.")
+st.title("🍌 Nano Banana Influencer Studio")
+st.info("Senior Engineer Note: This app uses the Nano Banana 2 multimodal engine to blend pose, face, and style.")
 
 with st.sidebar:
-    st.header("Authentication")
-    api_key = st.text_input("Gemini API Key", type="password", placeholder="AIza...")
-    st.info(f"Model: {MODEL_ID}")
+    st.header("API Credentials")
+    api_key = st.text_input("Nano Banana API Key", type="password", help="Get your key at nanobananaapi.ai")
+    st.divider()
+    st.write("### Model Settings")
+    resolution = st.selectbox("Resolution", ["1080x1350", "1024x1024", "720x1280"])
 
+# Main Application Columns
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Reference Inputs")
-    pose_img = st.file_uploader("1. Pose Reference", type=['jpg', 'png', 'jpeg'])
-    face_img = st.file_uploader("2. Face Identity", type=['jpg', 'png', 'jpeg'])
-    clothes_img = st.file_uploader("3. Clothing/Outfit", type=['jpg', 'png', 'jpeg'])
+    st.subheader("Reference Assets")
     
-    user_prompt = st.text_area("Setting & Details", value="Standing in a futuristic neon city street at night, cinematic lighting.")
+    pose_file = st.file_uploader("1. Upload Pose Reference", type=['png', 'jpg', 'jpeg'])
+    face_file = st.file_uploader("2. Upload Influencer Face", type=['png', 'jpg', 'jpeg'])
+    cloth_file = st.file_uploader("3. Upload Clothing/Style", type=['png', 'jpg', 'jpeg'])
     
+    custom_prompt = st.text_area(
+        "Scene Description", 
+        value="A high-end fashion influencer walking down a street in Milan, soft morning sunlight, 8k photorealistic.",
+        height=100
+    )
+
     generate_btn = st.button("Generate Influencer", type="primary", use_container_width=True)
 
 with col2:
-    st.subheader("Generated Result")
+    st.subheader("Generated Output")
     
     if generate_btn:
         if not api_key:
-            st.warning("Please enter your API Key.")
-        elif not all([pose_img, face_img, clothes_img]):
-            st.warning("Please upload all three reference images.")
+            st.error("Please provide your Nano Banana API key in the sidebar.")
+        elif not all([pose_file, face_file, cloth_file]):
+            st.warning("All three reference images are required for this model.")
         else:
-            with st.spinner("Nano Banana is processing your images..."):
-                p_b64 = encode_image_to_base64(pose_img)
-                f_b64 = encode_image_to_base64(face_img)
-                c_b64 = encode_image_to_base64(clothes_img)
+            with st.spinner("Banana is peeling the data... generating your influencer..."):
+                # Encode images
+                p_b64 = encode_image_to_base64(pose_file)
+                f_b64 = encode_image_to_base64(face_file)
+                c_b64 = encode_image_to_base64(cloth_file)
                 
-                result = generate_image(api_key, user_prompt, p_b64, f_b64, c_b64)
+                # Call API
+                result = generate_influencer_image(api_key, custom_prompt, p_b64, f_b64, c_b64)
                 
-                if result:
-                    found_image = False
-                    try:
-                        # Parsing the response parts to find the image data
-                        parts = result['candidates'][0]['content']['parts']
-                        for part in parts:
-                            if 'inline_data' in part:
-                                img_data = base64.b64decode(part['inline_data']['data'])
-                                gen_image = Image.open(BytesIO(img_data))
-                                st.image(gen_image, caption="Generated AI Influencer", use_column_width=True)
-                                
-                                # Provide a download button
-                                buf = BytesIO()
-                                gen_image.save(buf, format="PNG")
-                                st.download_button("Download Image", buf.getvalue(), "influencer.png", "image/png")
-                                found_image = True
-                                break
-                        
-                        if not found_image:
-                            st.warning("The API returned text instead of an image. Try refining your prompt.")
-                            if 'text' in parts[0]:
-                                st.info(f"Model response: {parts[0]['text']}")
-                                
-                    except (KeyError, IndexError) as e:
-                        st.error(f"Failed to parse image from response. JSON: {result}")
+                if result and "image_url" in result:
+                    st.image(result["image_url"], caption="Final AI Influencer Output")
+                    st.success("Generation Successful!")
+                    
+                    # Download option
+                    img_res = requests.get(result["image_url"])
+                    st.download_button("Download High-Res", img_res.content, "influencer.png", "image/png")
+                
+                elif result and "b64_json" in result:
+                    # If API returns base64 directly
+                    img_bytes = base64.b64decode(result["b64_json"])
+                    st.image(img_bytes, caption="Final AI Influencer Output")
+                    st.success("Generation Successful!")
+                else:
+                    st.error("Model failed to return an image. Check prompt constraints.")
 
-# Optional: Preview inputs
-if any([pose_img, face_img, clothes_img]):
-    with st.expander("View Uploaded References"):
+# Reference Previews
+if any([pose_file, face_file, cloth_file]):
+    with st.expander("Preview Selected Assets"):
         p_cols = st.columns(3)
-        if pose_img: p_cols[0].image(pose_img, caption="Pose")
-        if face_img: p_cols[1].image(face_img, caption="Face")
-        if clothes_img: p_cols[2].image(clothes_img, caption="Clothing")
+        if pose_file: p_cols[0].image(pose_file, caption="Pose")
+        if face_file: p_cols[1].image(face_file, caption="Face")
+        if cloth_file: p_cols[2].image(cloth_file, caption="Clothing")
