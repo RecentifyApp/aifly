@@ -1,44 +1,78 @@
 import streamlit as st
 import requests
+import base64
 from PIL import Image
 from io import BytesIO
 
 API_KEY = st.secrets["NANOBANANA_API_KEY"]
 
+def encode_image(file):
+    if file is None:
+        return None
+    return base64.b64encode(file.read()).decode("utf-8")
+
+
 def generate_image(pose, face, clothes, prompt):
 
-    url = "https://api.nanobanana.ai/generate"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
 
     headers = {
-        "Authorization": f"Bearer {API_KEY}"
+        "Content-Type": "application/json",
+        "X-goog-api-key": API_KEY
     }
 
-    files = {}
+    parts = [{"text": prompt}]
 
-    if pose:
-        files["pose"] = ("pose.png", pose, "image/png")
+    # Convert images to base64
+    pose_b64 = encode_image(pose)
+    face_b64 = encode_image(face)
+    clothes_b64 = encode_image(clothes)
 
-    if face:
-        files["face"] = ("face.png", face, "image/png")
+    if pose_b64:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/png",
+                "data": pose_b64
+            }
+        })
 
-    if clothes:
-        files["clothes"] = ("clothes.png", clothes, "image/png")
+    if face_b64:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/png",
+                "data": face_b64
+            }
+        })
+
+    if clothes_b64:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/png",
+                "data": clothes_b64
+            }
+        })
 
     data = {
-        "prompt": prompt
+        "contents": [
+            {
+                "parts": parts
+            }
+        ]
     }
 
-    response = requests.post(
-        url,
-        headers=headers,
-        files=files,
-        data=data
-    )
+    response = requests.post(url, headers=headers, json=data)
 
     result = response.json()
 
-    image_url = result["image_url"]
+    try:
+        parts = result["candidates"][0]["content"]["parts"]
 
-    img_response = requests.get(image_url)
+        for part in parts:
+            if "inline_data" in part:
+                image_data = part["inline_data"]["data"]
+                image_bytes = base64.b64decode(image_data)
+                return Image.open(BytesIO(image_bytes))
 
-    return Image.open(BytesIO(img_response.content))
+    except:
+        st.error(result)
+        return None
